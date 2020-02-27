@@ -1,0 +1,391 @@
+# This CloudFormation template deploys a basic VPC / Network.
+
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: >
+  Creates a VPC with public subnets for a given AWS Account.
+
+Parameters:
+  # EnvironmentName:
+  #   Description: An environment name that is prefixed to resource names
+  #   Type: String
+
+  VPCNAME:
+    Description: Name for this VPC
+    Type: String
+
+  VpcCIDR:
+    Description: Please enter the IP range (CIDR notation) for this VPC
+    Type: String
+
+  PublicSubnet1CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
+    Type: String
+
+  PublicSubnet2CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
+    Type: String
+
+  PublicSubnet3CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
+    Type: String
+
+  INTERNETGATEWAYNAME:
+    Description: Internet Gateway Name
+    Type: String
+
+  PBRTNAME:
+    Description: Public RouteTable Name
+    Type: String
+
+  DBName:
+    Description: Database Name
+    Type: String
+
+  DBUsername:
+    Description: Database Username
+    Type: String
+
+  DBPassword:
+    Description: Database Password
+    Type: String
+
+  EC2KeyName:
+    Description: Key Name
+    Type: String
+
+  AMIId:
+    Description: AMI Id
+    Type: String
+
+  EC2RoleName:
+    Description: EC2 Role Name
+    Type: String
+
+  WebS3PolicyName:
+    Description: Web S3 Policy Name
+    Type: String
+
+  InstanceType:
+    Description: Instance Type
+    Type: String
+
+  DBInstanceIdentifierVal:
+    Description: DBInstance Identifier Value
+    Type: String
+
+  AllocatedStorageValue:
+    Description: DBInstance Storage Value
+    Type: String
+
+  DBInstanceClassValue:
+    Description: DBInstance Class Value
+    Type: String
+
+  PubliclyAccessibleValue:
+    Description: Publicly Accessible Value
+    Type: String
+
+  EC2InstanceSizeValue:
+    Description: EC2 Instance Size Value
+    Type: String
+
+Resources:
+  # First, a VPC:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+      - Key: Name
+        Value:  !Join ['', [!Ref "AWS::StackName", "-VPC" ]]
+
+    # Our VPC will need internet access:     
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    DependsOn: VPC
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Ref INTERNETGATEWAYNAME
+  
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    # Notice how you can't attach an IGW to a VPC unless both are created:
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ""
+      CidrBlock: !Ref PublicSubnet1CIDR
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-Public-1
+
+  PublicSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ""
+      CidrBlock: !Ref PublicSubnet2CIDR
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-Public-2
+
+  PublicSubnet3:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone:
+        Fn::Select:
+          - 2
+          - Fn::GetAZs: ""
+      CidrBlock: !Ref PublicSubnet3CIDR
+      Tags:
+      - Key: Name
+        Value: !Sub ${AWS::StackName}-Public-3
+
+
+    # Some route tables for our subnets:
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: !Ref PBRTNAME
+
+  PublicRoute1:   # Public route table has direct routing to IGW:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+
+# Attach the public subnets to public route tables,
+  # and attach the private subnets to private route tables:   
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+  PublicSubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet3
+      RouteTableId: !Ref PublicRouteTable
+
+#
+
+  WebappSec:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Enable SSH access via port 22
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '8000'
+          ToPort: '8000'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '8080'
+          ToPort: '8080'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '443'
+          ToPort: '443'
+          CidrIp: 0.0.0.0/0
+
+
+
+  myDBSubnetGroup:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties:
+      DBSubnetGroupDescription: description
+      SubnetIds:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      Tags:
+        - Key: String
+          Value: String
+
+
+  RDSSec:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Enable RDS
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '5432'
+          ToPort: '5432'
+          SourceSecurityGroupId: !Ref WebappSec
+      Tags:
+        - Key: String
+          Value: String
+
+  MyDB:
+    Type: AWS::RDS::DBInstance #??
+    Properties:
+      DBName: !Ref DBName
+      AllocatedStorage: !Ref AllocatedStorageValue
+      DBInstanceClass: !Ref DBInstanceClassValue #??
+      Engine: postgres #??
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBSubnetGroupName: !Ref myDBSubnetGroup
+      DBInstanceIdentifier: !Ref DBInstanceIdentifierVal
+      VPCSecurityGroups:
+        - !Ref RDSSec
+      PubliclyAccessible: !Ref PubliclyAccessibleValue
+      MultiAZ: "false"
+      StorageType: gp2 #??
+      Tags:
+        - Key: String
+          Value: String
+
+
+  Bucket: # cannot be deleted with data
+    Type: 'AWS::S3::Bucket'
+    DeletionPolicy: Delete #doubt
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Status: Enabled
+            Transition:
+              TransitionInDays: 30
+              StorageClass: "STANDARD_IA"
+
+
+  EC2Role:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Ref EC2RoleName
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - 'ec2.amazonaws.com'
+            Action: sts:AssumeRole
+
+
+  WebAppS3:
+    DependsOn:
+      - EC2Role
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName: !Ref WebS3PolicyName
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action:
+              - s3:DeleteObject
+              - s3:DeleteObjectAcl
+              - s3:GetObject
+              - s3:GetObjectAcl
+              - s3:ListObject
+              - s3:ListObjectAcl
+              - s3:PutObject
+              - s3:PutObjectAcl
+            Resource:
+              #- !Join ['', ['arn:aws:s3:::*']]
+              - !Join ['', ['arn:aws:s3:::', !Ref Bucket, '/*']]
+      Roles:
+        - !Ref EC2Role
+
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub ${AWS::StackName}-DjangoEC2InstanceProfile
+      Path: "/"
+      Roles:
+        - !Ref EC2Role
+
+
+  DjangoEC2Instance:
+      Type: AWS::EC2::Instance
+      DependsOn: AttachGateway
+      Properties:
+        ImageId: !Ref AMIId #parameter??dynamic-entry??
+        InstanceType: !Ref InstanceType #parameter
+        KeyName: !Ref EC2KeyName #
+        IamInstanceProfile : !Ref InstanceProfile
+        BlockDeviceMappings:
+          - DeviceName: "/dev/sdm"
+            Ebs:
+              VolumeType: gp2
+              VolumeSize:
+                Ref: EC2InstanceSizeValue
+        NetworkInterfaces:
+          - AssociatePublicIpAddress: "true"
+            DeviceIndex: "0"
+            SubnetId: !Ref PublicSubnet3
+            DeleteOnTermination: true
+            GroupSet:
+              - !Ref WebappSec
+        Tags:
+          - Key: Name
+            Value: myInstance
+        UserData:
+          Fn::Base64:
+            Fn::Join:
+            - ""
+            - - "#!/bin/bash\n"
+              - "cd /home/ubuntu\n"
+              - "touch .bashrc\n"
+              - "echo $'export DB_HOST=\""
+              - !GetAtt MyDB.Endpoint.Address
+              - "\"\n' >> .bashrc"
+              - "echo $'export DB_NAME=\""
+              - !Ref DBName
+              - "\"\n' >> .bashrc"
+              - "echo $'export DB_USERNAME=\""
+              - !Ref DBUsername
+              - "\"\n' >> .bashrc"
+              - "echo $'export DB_PASSWORD=\""
+              - !Ref DBPassword
+              - "\"\n' >> .bashrc"
+              - "echo $'export S3_BUCKET_NAME=\""
+              - !Ref Bucket
+              - "\"\n' >> .bashrc"
