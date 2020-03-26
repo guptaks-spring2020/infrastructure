@@ -114,7 +114,53 @@ Parameters:
     Description: Region
     Type: String
 
+  DomainNameValue:
+    Type: String
+    Default: dev.kshitizgupta.me
 
+  HostedZoneIdValue:
+    Type: String
+    Default: ZSN8G6SXDTXF8
+
+  AlarmHighEvaluationPeriodValue:
+    Type: String
+    Default: 300
+
+  AlarmHighPeriodValue:
+    Type: String
+    Default: 1
+
+  AlarmLowEvaluationPeriodValue:
+    Type: String
+    Default: 300
+
+  AlarmLowPeriodValue:
+    Type: String
+    Default: 1
+
+  AlarmHighThreshold:
+    Type: String
+    Default: 10
+
+  AlarmLowThreshold:
+    Type: String
+    Default: 5
+
+  TargetGroupMatcherHttpCode:
+    Type: String
+    Default: 401
+
+  WebServerMinCapacity:
+    Type: String
+    Default: 3
+
+  WebServerMaxCapacity:
+    Type: String
+    Default: 3
+
+  WebServerDesiredCapacity:
+    Type: String
+    Default: 10
 
 Resources:
 
@@ -371,51 +417,51 @@ Resources:
         - !Ref EC2Role
 
 
-  DjangoEC2Instance:
-      Type: AWS::EC2::Instance
-      DependsOn: AttachGateway
-      Properties:
-        ImageId: !Ref AMIId
-        InstanceType: !Ref InstanceType
-        KeyName: !Ref EC2KeyName
-        IamInstanceProfile : !Ref InstanceProfile
-        BlockDeviceMappings:
-          - DeviceName: "/dev/sdm"
-            Ebs:
-              VolumeType: gp2
-              VolumeSize:
-                Ref: EC2InstanceSizeValue
-        NetworkInterfaces:
-          - AssociatePublicIpAddress: "true"
-            DeviceIndex: "0"
-            SubnetId: !Ref PublicSubnet3
-            DeleteOnTermination: true
-            GroupSet:
-              - !Ref WebappSec
-        Tags:
-          - Key: !Ref EC2TAGKEY
-            Value: !Ref EC2TAGVALUE
-        UserData:
-          Fn::Base64:
-            Fn::Join:
-            - ""
-            - - "#!/bin/bash\n"
-              - "cd /etc/\n"
-              - "echo $'export DB_HOST=\""
-              - !GetAtt MyDB.Endpoint.Address
-              - "\"\n' >> environment"
-              - "echo $'export DB_NAME=\""
-              - !Ref DBName
-              - "\"\n' >> environment"
-              - "echo $'export DB_USERNAME=\""
-              - !Ref DBUsername
-              - "\"\n' >> environment"
-              - "echo $'export DB_PASSWORD=\""
-              - !Ref DBPassword
-              - "\"\n' >> environment"
-              - "echo $'export S3_BUCKET_NAME=\""
-              - !Ref Bucket
-              - "\"\n' >> environment"
+#  DjangoEC2Instance:
+#      Type: AWS::EC2::Instance
+#      DependsOn: AttachGateway
+#      Properties:
+#        ImageId: !Ref AMIId
+#        InstanceType: !Ref InstanceType
+#        KeyName: !Ref EC2KeyName
+#        IamInstanceProfile : !Ref InstanceProfile
+#        BlockDeviceMappings:
+#          - DeviceName: "/dev/sdm"
+#            Ebs:
+#              VolumeType: gp2
+#              VolumeSize:
+#                Ref: EC2InstanceSizeValue
+#        NetworkInterfaces:
+#          - AssociatePublicIpAddress: "true"
+#            DeviceIndex: "0"
+#            SubnetId: !Ref PublicSubnet3
+#            DeleteOnTermination: true
+#            GroupSet:
+#              - !Ref WebappSec
+#        Tags:
+#          - Key: !Ref EC2TAGKEY
+#            Value: !Ref EC2TAGVALUE
+#        UserData:
+#          Fn::Base64:
+#            Fn::Join:
+#            - ""
+#            - - "#!/bin/bash\n"
+#              - "cd /etc/\n"
+#              - "echo $'export DB_HOST=\""
+#              - !GetAtt MyDB.Endpoint.Address
+#              - "\"\n' >> environment"
+#              - "echo $'export DB_NAME=\""
+#              - !Ref DBName
+#              - "\"\n' >> environment"
+#              - "echo $'export DB_USERNAME=\""
+#              - !Ref DBUsername
+#              - "\"\n' >> environment"
+#              - "echo $'export DB_PASSWORD=\""
+#              - !Ref DBPassword
+#              - "\"\n' >> environment"
+#              - "echo $'export S3_BUCKET_NAME=\""
+#              - !Ref Bucket
+#              - "\"\n' >> environment"
 
 
   CodeDeployServiceRole:
@@ -577,6 +623,7 @@ Resources:
     Properties:
       ApplicationName: !Ref CodeDeployApplication
       AutoRollbackConfiguration:
+        Enabled: true
         Events:
           - DEPLOYMENT_FAILURE
       DeploymentConfigName: CodeDeployDefault.AllAtOnce
@@ -590,3 +637,203 @@ Resources:
           Type: KEY_AND_VALUE
       ServiceRoleArn:
         Fn::GetAtt: [ CodeDeployServiceRole, Arn ]
+      AutoScalingGroups:
+        - Ref: WebServerGroup
+      LoadBalancerInfo:
+        TargetGroupInfoList:
+          - Name:
+              Fn::GetAtt:
+                - TargetGroup
+                - TargetGroupName
+
+
+  AppLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      IpAddressType: ipv4
+      SecurityGroups:
+        - Ref: WebappSec
+      Subnets:
+        - Ref: PublicSubnet2
+        - Ref: PublicSubnet3
+      Name: AppLoadBalancer
+      Scheme: internet-facing
+      Tags:
+        - Key: Name
+          Value: Loadbalancer
+      Type: application
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: "/"
+      HealthCheckPort: '8000'
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 7
+      HealthyThresholdCount: 3
+      Name: !Sub ${AWS::StackName}-TargetGroup
+      Port: 8000
+      Protocol: HTTP
+      TargetType: instance
+      UnhealthyThresholdCount: 5
+      VpcId:
+        Ref: VPC
+      Matcher:
+        HttpCode: !Ref TargetGroupMatcherHttpCode
+
+
+  EC2LaunchConfiguration:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      UserData:
+        Fn::Base64:
+          Fn::Join:
+            - ""
+            - - "#!/bin/bash\n"
+              - "cd /etc/\n"
+              - "echo $'export DB_HOST=\""
+              - !GetAtt MyDB.Endpoint.Address
+              - "\"\n' >> environment"
+              - "echo $'export DB_NAME=\""
+              - !Ref DBName
+              - "\"\n' >> environment"
+              - "echo $'export DB_USERNAME=\""
+              - !Ref DBUsername
+              - "\"\n' >> environment"
+              - "echo $'export DB_PASSWORD=\""
+              - !Ref DBPassword
+              - "\"\n' >> environment"
+              - "echo $'export S3_BUCKET_NAME=\""
+              - !Ref Bucket
+              - "\"\n' >> environment"
+      ImageId:
+        Ref: AMIId
+      KeyName:
+        Ref: EC2KeyName
+      SecurityGroups:
+        - Ref: WebappSec
+      LaunchConfigurationName: EC2LaunchConfiguration
+      InstanceType: t2.micro
+      AssociatePublicIpAddress: true
+      BlockDeviceMappings:
+        - DeviceName: "/dev/sdm"
+          Ebs:
+            VolumeType: gp2
+            DeleteOnTermination: 'true'
+            VolumeSize:
+              Ref: EC2InstanceSizeValue
+      IamInstanceProfile:
+        Ref: InstanceProfile
+
+
+
+  WebServerGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      LaunchConfigurationName:
+        Ref: EC2LaunchConfiguration
+      MinSize: !Ref WebServerMinCapacity
+      MaxSize: !Ref WebServerMaxCapacity
+      TargetGroupARNs:
+        - Ref: TargetGroup
+      Tags:
+        - Key:
+            Ref: EC2TAGKEY
+          Value:
+            Ref: EC2TAGVALUE
+          PropagateAtLaunch: true
+      DesiredCapacity: !Ref WebServerDesiredCapacity
+      Cooldown: '60'
+      VPCZoneIdentifier:
+        - Ref: PublicSubnet2
+        - Ref: PublicSubnet3
+
+  ServerScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: WebServerGroup
+      Cooldown: '60'
+      ScalingAdjustment: '1'
+
+
+  ServerScaleDownPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AdjustmentType: ChangeInCapacity
+      AutoScalingGroupName:
+        Ref: WebServerGroup
+      Cooldown: '60'
+      ScalingAdjustment: "-1"
+
+
+  CPUAlarmHigh:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scale-up if CPU > 5% for 2 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: !Ref AlarmHighPeriodValue
+      EvaluationPeriods: !Ref AlarmHighEvaluationPeriodValue
+      Threshold: !Ref AlarmHighThreshold
+      AlarmActions:
+        - Ref: ServerScaleUpPolicy
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value:
+            Ref: WebServerGroup
+      ComparisonOperator: GreaterThanThreshold
+
+
+  CPUAlarmLow:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Scale-down if CPU < 3% for 2 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: !Ref AlarmLowPeriodValue
+      EvaluationPeriods: !Ref AlarmLowEvaluationPeriodValue
+      Threshold: !Ref AlarmLowThreshold
+      AlarmActions:
+        - Ref: ServerScaleDownPolicy
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value:
+            Ref: WebServerGroup
+      ComparisonOperator: LessThanThreshold
+
+
+  DNSRecordSet:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      Name:
+        Ref: DomainNameValue
+      HostedZoneId:
+        Ref: HostedZoneIdValue
+      AliasTarget:
+        HostedZoneId:
+          Fn::GetAtt:
+            - AppLoadBalancer
+            - CanonicalHostedZoneID
+        DNSName:
+          Fn::GetAtt:
+            - AppLoadBalancer
+            - DNSName
+      Type: A
+
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: TargetGroup
+      LoadBalancerArn:
+        Ref: AppLoadBalancer
+      Port: 80
+      Protocol: HTTP
