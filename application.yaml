@@ -280,11 +280,8 @@ Resources:
         - IpProtocol: tcp
           FromPort: '8000'
           ToPort: '8000'
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: '8080'
-          ToPort: '8080'
-          CidrIp: 0.0.0.0/0
+          SourceSecurityGroupId:
+            Ref: AppLoadBalancerSecurityGroup
         - IpProtocol: tcp
           FromPort: '80'
           ToPort: '80'
@@ -292,7 +289,28 @@ Resources:
         - IpProtocol: tcp
           FromPort: '443'
           ToPort: '443'
+          SourceSecurityGroupId:
+            Ref: AppLoadBalancerSecurityGroup
+
+  AppLoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: This is done to enable access of HTTP via port 80, SSH access via port 22
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '443'
+          ToPort: '443'
           CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '8000'
+          ToPort: '8000'
+          CidrIp: 0.0.0.0/0
+      VpcId:
+        Ref: VPC
 
 
 
@@ -652,7 +670,7 @@ Resources:
     Properties:
       IpAddressType: ipv4
       SecurityGroups:
-        - Ref: WebappSec
+        - Ref: AppLoadBalancerSecurityGroup
       Subnets:
         - Ref: PublicSubnet2
         - Ref: PublicSubnet3
