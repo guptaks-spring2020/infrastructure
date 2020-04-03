@@ -166,6 +166,15 @@ Parameters:
     Type: String
     Default: csye6225
 
+  SNSTopicName:
+    Type: String
+    Default: due_bill_topic
+
+  SQSQueueName:
+    Type: String
+    Default: BillQueue
+
+
 Resources:
 
   VPC:
@@ -738,7 +747,7 @@ Resources:
               - !Ref SQSQueueName
               - "\"\n' >> environment"
               - "echo $'export AWSID=\""
-              - !Ref AccountId
+              - !Ref AWS::AccountId
               - "\"\n' >> environment"
       ImageId:
         Ref: AMIId
@@ -746,7 +755,7 @@ Resources:
         Ref: EC2KeyName
       SecurityGroups:
         - Ref: WebappSec
-      LaunchConfigurationName: EC2LaunchConfiguration
+      LaunchConfigurationName: !Sub ${AWS::StackName}-EC2LaunchConfiguration
       InstanceType: t2.micro
       AssociatePublicIpAddress: true
       BlockDeviceMappings:
@@ -891,11 +900,12 @@ Resources:
                   - Ref: AWS::Region
                   - ":"
                   - Ref: AWS::AccountId
-                  - ":due_bill_topic"
+                  - ":"
+                  - Ref: SNSTopicName
   SQSQueue:
     Type: AWS::SQS::Queue
     Properties:
-      QueueName: BillQueue
+      QueueName: !Ref SQSQueueName
 
 
   DynamoDBTable:
@@ -999,7 +1009,7 @@ Resources:
           - EmailLambdaFunction
           - Arn
         Protocol: lambda
-      TopicName: due_bill_topic
+      TopicName: !Ref SNSTopicName
 
   DynamoDBLambdaSesAccessPolicy:
     Type: AWS::IAM::ManagedPolicy
