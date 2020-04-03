@@ -162,6 +162,19 @@ Parameters:
     Type: String
     Default: 10
 
+  DynamaoTableName:
+    Type: String
+    Default: csye6225
+
+  SNSTopicName:
+    Type: String
+    Default: due_bill_topic
+
+  SQSQueueName:
+    Type: String
+    Default: BillQueue
+
+
 Resources:
 
   VPC:
@@ -396,6 +409,8 @@ Resources:
                 - 'ec2.amazonaws.com'
             Action: sts:AssumeRole
       ManagedPolicyArns:
+        - Ref: Ec2SNSPolicy
+        - arn:aws:iam::aws:policy/AmazonSQSFullAccess
         - 'arn:aws:iam::aws:policy/CloudWatchAgentAdminPolicy'
         - 'arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy'
 
@@ -725,13 +740,22 @@ Resources:
               - "echo $'export S3_BUCKET_NAME=\""
               - !Ref Bucket
               - "\"\n' >> environment"
+              - "echo $'export SNSNAME=\""
+              - !Ref SNSTopicName
+              - "\"\n' >> environment"
+              - "echo $'export SQSNAME=\""
+              - !Ref SQSQueueName
+              - "\"\n' >> environment"
+              - "echo $'export AWSID=\""
+              - !Ref AWS::AccountId
+              - "\"\n' >> environment"
       ImageId:
         Ref: AMIId
       KeyName:
         Ref: EC2KeyName
       SecurityGroups:
         - Ref: WebappSec
-      LaunchConfigurationName: EC2LaunchConfiguration
+      LaunchConfigurationName: !Sub ${AWS::StackName}-EC2LaunchConfiguration
       InstanceType: t2.micro
       AssociatePublicIpAddress: true
       BlockDeviceMappings:
@@ -855,3 +879,186 @@ Resources:
         Ref: AppLoadBalancer
       Port: 80
       Protocol: HTTP
+
+
+  Ec2SNSPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${AWS::StackName}-ec2-sns-policy
+      Description: Policy that allows ec2 to access sns
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - sns:Publish
+              - sns:CreateTopic
+            Effect: Allow
+            Resource:
+              Fn::Join:
+                - ''
+                - - 'arn:aws:sns:'
+                  - Ref: AWS::Region
+                  - ":"
+                  - Ref: AWS::AccountId
+                  - ":"
+                  - Ref: SNSTopicName
+  SQSQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Ref SQSQueueName
+
+
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: email
+        AttributeType: S
+      KeySchema:
+      - AttributeName: email
+        KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: '5'
+        WriteCapacityUnits: '5'
+      TableName:
+        Ref: DynamaoTableName #pass value
+      TimeToLiveSpecification:
+        AttributeName: TTL
+        Enabled: true
+
+
+  CircleCILambdaUpdate:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - lambda:UpdateFunctionCode
+          Resource:
+          - Fn::Join:
+            - ''
+            - - 'arn:aws:lambda:us-east-1:' #parameterize
+              - Ref: AWS::AccountId
+              - ":function:EmailLambdaFunction"
+      PolicyName: Circle-CI-Lambda-Update
+      Users:
+      - circleci
+
+
+  EmailLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: EmailLambdaFunction
+      Handler: lambda_func.handler_name
+      Role:
+        Fn::GetAtt:
+        - LambdaRole
+        - Arn
+      Code:
+        S3Bucket:
+          Ref: CodeDeployBucket
+        S3Key: serverless.zip
+      Environment:
+        Variables:
+          DynamoDBEndPoint: dynamodb.us-east-1.amazonaws.com
+          ttlInMin: '60'
+          domain:
+            Ref: DomainNameValue
+      Runtime: python3.7
+      ReservedConcurrentExecutions: 5
+      MemorySize: 256
+      Timeout: '900'
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: LambdaRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      ManagedPolicyArns:
+      - Ref: DynamoDBLambdaSesAccessPolicy
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+
+  EmailLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName:
+        Ref: EmailLambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn:
+        Ref: DueBill
+
+  DueBill:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+      - Endpoint:
+          Fn::GetAtt:
+          - EmailLambdaFunction
+          - Arn
+        Protocol: lambda
+      TopicName: !Ref SNSTopicName
+
+  DynamoDBLambdaSesAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: DynamoDBLambdaSesAccessPolicy
+      Description: Policy for lambda that will access the ses and dynamodb
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action:
+          - dynamodb:PutItem
+          - dynamodb:GetItem
+          - dynamodb:Query
+          Effect: Allow
+          Resource:
+          - Fn::Join:
+            - ''
+            - - 'arn:aws:dynamodb:'
+              - Ref: AWS::Region
+              - ":"
+              - Ref: AWS::AccountId
+              - ":table/"
+              - Ref: DynamaoTableName #passvalue
+        - Action: ses:SendEmail
+          Effect: Allow
+          Resource: "*"
+
+  SNStopicpolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2008-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            AWS: "*"
+          Action:
+          - SNS:Publish
+          - SNS:DeleteTopic
+          - SNS:ListSubscriptionsByTopic
+          - SNS:GetTopicAttributes
+          - SNS:Receive
+          - SNS:AddPermission
+          - SNS:Subscribe
+          Resource:
+            Ref: DueBill
+          Condition:
+            StringEquals:
+              AWS:SourceOwner:
+                Ref: AWS::AccountId
+      Topics:
+      - Ref: DueBill
