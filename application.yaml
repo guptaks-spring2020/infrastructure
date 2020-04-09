@@ -377,7 +377,19 @@ Resources:
       Tags:
         - Key: String
           Value: String
+      DBParameterGroupName:
+        Ref: RDSDBParamGroup
 
+  RDSDBParamGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: DB Parameter Group enable SSL in RDS
+      Family: postgres11
+      Parameters:
+        rds.force_ssl: '1'
+      Tags:
+        - Key: Name
+          Value: rds-db-parameter-group
 
   Bucket:
     Type: 'AWS::S3::Bucket'
