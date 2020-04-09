@@ -61,3 +61,8 @@ Wait for CloudFormation Stack Deletion
 aws cloudformation wait stack-delete-complete
 
 --stack-name [stack-name]
+
+
+#Configuring load balancer to use the imported certificate
+
+aws acm import-certificate --certificate fileb://csr_certificate.pem --certificate-chain fileb://csr_bundle.pem --private-key fileb://~/csr-key.pem --profile prod
